@@ -1,0 +1,141 @@
+plugins {
+  id 'java'
+  id 'application'
+  id 'com.github.johnrengelman.shadow' version '5.0.0'
+  id 'nu.studer.jooq' version '4.1'
+}
+apply plugin: 'java'
+group = 'com.example'
+version = '1.0.0-SNAPSHOT'
+
+repositories {
+  mavenCentral()
+  jcenter()
+}
+
+ext {
+  vertxVersion = '3.8.5'
+  junitJupiterEngineVersion = '5.4.0'
+}
+
+application {
+  mainClassName = 'io.vertx.core.Launcher'
+}
+
+sourceCompatibility = '1.8'
+
+def mainVerticleName = 'com.example.demo.MainVerticle'
+def watchForChange = 'src/**/*'
+def doOnChange = './gradlew classes'
+
+dependencies {
+  implementation "io.vertx:vertx-web-client:$vertxVersion"
+  implementation "io.vertx:vertx-jdbc-client:$vertxVersion"
+  implementation "io.vertx:vertx-web:$vertxVersion"
+  implementation "org.jooq:jooq:3.11.11"
+  implementation "org.jooq:jooq-meta:3.11.11"
+  implementation "org.jooq:jooq-codegen:3.11.11"
+  implementation "org.postgresql:postgresql:42.2.10"
+  implementation "postgresql:postgresql:9.1-901-1.jdbc4"
+  implementation "com.fasterxml.jackson.core:jackson-core:2.10.2"
+  implementation("com.google.code.gson:gson:2.8.0")
+
+  testImplementation "io.vertx:vertx-junit5:$vertxVersion"
+  testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:$junitJupiterEngineVersion"
+  testImplementation "org.junit.jupiter:junit-jupiter-api:$junitJupiterEngineVersion"
+  jooqRuntime 'org.postgresql:postgresql:42.2.5'
+  jooqRuntime 'postgresql:postgresql:9.1-901.jdbc4'
+}
+
+
+shadowJar {
+  classifier = 'fat'
+  manifest {
+    attributes 'Main-Verticle': mainVerticleName
+  }
+  mergeServiceFiles {
+    include 'META-INF/services/io.vertx.core.spi.VerticleFactory'
+  }
+}
+
+test {
+  useJUnitPlatform()
+  testLogging {
+    events 'PASSED', 'FAILED', 'SKIPPED'
+  }
+}
+
+run {
+  args = ['run', mainVerticleName, "--redeploy=$watchForChange", "--launcher-class=$mainClassName", "--on-redeploy=$doOnChange"]
+}
+
+jooq {
+  version = '3.12.3'
+  edition = 'OSS'
+  generateSchemaSourceOnCompilation = true
+  sample(sourceSets.main) {
+    jdbc {
+      driver = 'org.postgresql.Driver'
+      url = 'jdbc:postgresql://127.0.0.1:5432/jooq'
+      user = 'postgres'
+      password = '12345'
+      properties {
+        //  property {
+        //  key = 'ssl'
+        // value = 'true'
+        // }
+      }
+    }
+    generator {
+      name = 'org.jooq.codegen.DefaultGenerator'
+      strategy {
+        name = 'org.jooq.codegen.DefaultGeneratorStrategy'
+        // ...
+      }
+      database {
+        name = 'org.jooq.meta.postgres.PostgresDatabase'
+        inputSchema = 'public'
+        forcedTypes {
+          forcedType {
+            name = 'varchar'
+            expression = '.*'
+            types = 'JSONB?'
+          }
+          forcedType {
+            name = 'varchar'
+            expression = '.*'
+            types = 'INET'
+          }
+        }
+        // ...
+      }
+      generate {
+        relations = true
+        deprecated = false
+        records = true
+        immutablePojos = true
+        fluentSetters = true
+        // ...
+      }
+      target {
+        packageName = 'com.example.demo'
+        directory = 'src/main/java'
+      }
+    }
+  }
+}
+
+tasks.generateSampleJooqSchemaSource.with {
+  def out = new ByteArrayOutputStream()
+  javaExecSpec = { JavaExecSpec s ->
+    s.standardOutput = out
+    s.errorOutput = out
+    s.ignoreExitValue = true
+    s.jvmArgs '-Xmx512M'
+  }
+  execResultHandler = { ExecResult r ->
+    if (r.exitValue != 0) {
+      throw new RuntimeException('jOOQ source code generation failed:\n\n' + out.toString())
+    }
+  }
+}
